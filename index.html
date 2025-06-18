@@ -1,0 +1,533 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LFSR Crypto Decoder</title>
+    <style>
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+        }
+
+        .container {
+            background: rgba(255, 255, 255, 0.95);
+            border-radius: 15px;
+            padding: 30px;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.1);
+        }
+
+        h1 {
+            text-align: center;
+            color: #333;
+            margin-bottom: 30px;
+            font-size: 2.5em;
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .form-group {
+            margin-bottom: 20px;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+            color: #555;
+        }
+
+        textarea, input, select {
+            width: 100%;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+
+        textarea:focus, input:focus, select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        textarea {
+            resize: vertical;
+            min-height: 120px;
+            font-family: 'Courier New', monospace;
+        }
+
+        .inline-group {
+            display: flex;
+            gap: 15px;
+            align-items: end;
+        }
+
+        .inline-group > div {
+            flex: 1;
+        }
+
+        button {
+            background: linear-gradient(45deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: bold;
+            cursor: pointer;
+            transition: transform 0.2s, box-shadow 0.2s;
+            width: 100%;
+            margin-top: 20px;
+        }
+
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        #notification {
+            margin-top: 20px;
+            padding: 15px;
+            border-radius: 8px;
+            display: none;
+        }
+
+        .notification-success {
+            background: #d4edda;
+            border: 1px solid #c3e6cb;
+            color: #155724;
+        }
+
+        .notification-error {
+            background: #f8d7da;
+            border: 1px solid #f5c6cb;
+            color: #721c24;
+        }
+
+        .notification-info {
+            background: #d1ecf1;
+            border: 1px solid #bee5eb;
+            color: #0c5460;
+        }
+
+        #result {
+            margin-top: 20px;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border-left: 4px solid #667eea;
+            display: none;
+        }
+
+        .result-content {
+            font-family: 'Courier New', monospace;
+            white-space: pre-wrap;
+            word-break: break-all;
+            background: white;
+            padding: 15px;
+            border-radius: 5px;
+            margin-top: 10px;
+        }
+
+        .debug-info {
+            margin-top: 15px;
+            padding: 10px;
+            background: #e9ecef;
+            border-radius: 5px;
+            font-size: 12px;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔐 LFSR Crypto Decoder</h1>
+
+        <div class="form-group">
+            <label for="ciphertext">Ciphertext:</label>
+            <textarea id="ciphertext" placeholder="Enter your ciphertext here..."></textarea>
+        </div>
+
+        <div class="inline-group">
+            <div class="form-group">
+                <label for="format">Ciphertext Format:</label>
+                <select id="format">
+                    <option value="hex">Hexadecimal</option>
+                    <option value="base64">Base64</option>
+                </select>
+            </div>
+
+            <div class="form-group">
+                <label for="offset">Crib Offset:</label>
+                <input type="number" id="offset" value="0" placeholder="Position (negative = from end)">
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label for="crib">Known Plaintext (Crib):</label>
+            <input type="text" id="crib" placeholder="Enter known plaintext...">
+        </div>
+
+        <button onclick="decodeCipher()">🔓 Decode Cipher</button>
+
+        <div id="notification"></div>
+        <div id="result"></div>
+    </div>
+
+    <script>
+        // Berlekamp-Massey implementation
+        class BerlekampMassey {
+            constructor(sequence) {
+                const n = sequence.length;
+                const s = sequence.map(bit => parseInt(bit));
+
+                // Find the first 1 in the sequence
+                let k = 0;
+                for (k = 0; k < n; k++) {
+                    if (s[k] === 1) break;
+                }
+
+                if (k === n) {
+                    // All zeros case
+                    this._f = new Set();
+                    this._l = 0;
+                    return;
+                }
+
+                this._f = new Set([k + 1, 0]);
+                this._l = k + 1;
+
+                let g = new Set([0]);
+                let a = k;
+                let b = 0;
+
+                for (let n_i = k + 1; n_i < n; n_i++) {
+                    let d = 0;
+                    for (let item of this._f) {
+                        if (item + n_i - this._l < s.length) {
+                            d ^= s[item + n_i - this._l];
+                        }
+                    }
+
+                    if (d === 0) {
+                        b += 1;
+                    } else {
+                        if (2 * this._l > n_i) {
+                            const newSet = new Set();
+                            for (let item of g) {
+                                newSet.add(a - b + item);
+                            }
+                            this._f = this.symmetricDifference(this._f, newSet);
+                            b += 1;
+                        } else {
+                            const temp = new Set(this._f);
+                            const newF = new Set();
+                            for (let item of this._f) {
+                                newF.add(b - a + item);
+                            }
+                            this._f = this.symmetricDifference(newF, g);
+                            this._l = n_i + 1 - this._l;
+                            g = temp;
+                            a = b;
+                            b = n_i - this._l + 1;
+                        }
+                    }
+                }
+            }
+
+            symmetricDifference(setA, setB) {
+                const result = new Set();
+                for (let item of setA) {
+                    if (!setB.has(item)) result.add(item);
+                }
+                for (let item of setB) {
+                    if (!setA.has(item)) result.add(item);
+                }
+                return result;
+            }
+
+            getPolynomial() {
+                return Array.from(this._f).sort((a, b) => b - a);
+            }
+
+            getPolynomialDegree() {
+                return this._l;
+            }
+
+            toString() {
+                if (this._f.size === 0) return "0";
+                const terms = [];
+                const sorted = Array.from(this._f).sort((a, b) => b - a);
+                for (let i of sorted) {
+                    if (i === 0) {
+                        terms.push("1");
+                    } else {
+                        terms.push(`x^${i}`);
+                    }
+                }
+                return terms.join(" + ");
+            }
+        }
+
+        // LFSR implementation
+        class LFSR {
+            constructor(polynomial, seed) {
+                this._dq = seed.map(bit => parseInt(bit));
+                this._polynomial = polynomial;
+
+                const degree = Math.max(...polynomial);
+                const b = polynomial.map(x => degree - x - 1);
+                this._polynomial_bin = [];
+                for (let i = 0; i < seed.length; i++) {
+                    this._polynomial_bin.push(b.includes(i) ? 1 : 0);
+                }
+                this._polynomial_bin.reverse();
+                this._clock = 0;
+            }
+
+            setState(state) {
+                this._dq = [...state];
+                this._clock = 0;
+            }
+
+            nextBit() {
+                let b = 0;
+                for (let i = 0; i < this._polynomial_bin.length; i++) {
+                    if (this._polynomial_bin[i] === 1) {
+                        b ^= this._dq[i];
+                    }
+                }
+                const ret = this._dq.shift();
+                this._dq.push(b);
+                this._clock += 1;
+                return ret;
+            }
+
+            nextByte() {
+                let result = 0;
+                for (let i = 0; i < 8; i++) {
+                    result = (result << 1) | this.nextBit();
+                }
+                return result;
+            }
+
+            getClock() {
+                return this._clock;
+            }
+        }
+
+        function showNotification(message, type = 'info') {
+            const notification = document.getElementById('notification');
+            notification.textContent = message;
+            notification.className = `notification-${type}`;
+            notification.style.display = 'block';
+
+            if (type === 'success') {
+                setTimeout(() => {
+                    notification.style.display = 'none';
+                }, 5000);
+            }
+        }
+
+        function showResult(plaintext, debugInfo = '') {
+            const result = document.getElementById('result');
+            result.innerHTML = `
+                <h3>Decoded Result:</h3>
+                <div class="result-content">${plaintext}</div>
+                ${debugInfo ? `<div class="debug-info">${debugInfo}</div>` : ''}
+            `;
+            result.style.display = 'block';
+        }
+
+        function bytesToBits(bytes) {
+            const bits = [];
+            for (let byte of bytes) {
+                for (let i = 7; i >= 0; i--) {
+                    bits.push((byte >> i) & 1);
+                }
+            }
+            return bits;
+        }
+
+        function bitsToBytes(bits) {
+            const bytes = [];
+            for (let i = 0; i < bits.length; i += 8) {
+                let byte = 0;
+                for (let j = 0; j < 8 && i + j < bits.length; j++) {
+                    byte = (byte << 1) | bits[i + j];
+                }
+                bytes.push(byte);
+            }
+            return bytes;
+        }
+
+        function reconstructInitialState(polynomial, knownKeystream, offset) {
+            if (polynomial.length === 0) {
+                throw new Error("Invalid polynomial");
+            }
+
+            const degree = Math.max(...polynomial);
+            const keystreamBits = bytesToBits(knownKeystream);
+
+            if (keystreamBits.length < degree) {
+                throw new Error("Not enough keystream to reconstruct state");
+            }
+
+            // For positive offsets, we need to work backwards
+            if (offset >= 0) {
+                // Create LFSR and run it backwards
+                // This is complex - for now, try a simpler approach
+                return reconstructStateSimple(polynomial, keystreamBits, degree);
+            } else {
+                // For negative offsets, we can work more directly
+                return reconstructStateSimple(polynomial, keystreamBits, degree);
+            }
+        }
+
+        function reconstructStateSimple(polynomial, keystreamBits, degree) {
+            // Try to reconstruct state by assuming the keystream bits represent
+            // consecutive outputs and working backwards
+
+            // Simple approach: use first 'degree' bits as initial guess
+            let initialState = keystreamBits.slice(0, degree);
+
+            // Verify by running LFSR forward
+            const testLfsr = new LFSR(polynomial, initialState);
+            const testBits = [];
+            for (let i = 0; i < Math.min(keystreamBits.length, 64); i++) {
+                testBits.push(testLfsr.nextBit());
+            }
+
+            // Check if it matches
+            let matches = 0;
+            for (let i = 0; i < Math.min(testBits.length, keystreamBits.length); i++) {
+                if (testBits[i] === keystreamBits[i]) matches++;
+            }
+
+            if (matches / Math.min(testBits.length, keystreamBits.length) < 0.8) {
+                throw new Error("Could not reconstruct valid initial state");
+            }
+
+            return initialState;
+        }
+
+        function decodeCipher() {
+            try {
+                const ciphertextInput = document.getElementById('ciphertext').value.trim();
+                const format = document.getElementById('format').value;
+                const offset = parseInt(document.getElementById('offset').value) || 0;
+                const crib = document.getElementById('crib').value;
+
+                if (!ciphertextInput || !crib) {
+                    showNotification('Please enter both ciphertext and known plaintext', 'error');
+                    return;
+                }
+
+                // Parse ciphertext
+                let cipherBytes;
+                if (format === 'hex') {
+                    const hexString = ciphertextInput.replace(/\s+/g, '');
+                    if (!/^[0-9a-fA-F]+$/.test(hexString) || hexString.length % 2 !== 0) {
+                        throw new Error('Invalid hexadecimal format');
+                    }
+                    cipherBytes = [];
+                    for (let i = 0; i < hexString.length; i += 2) {
+                        cipherBytes.push(parseInt(hexString.substr(i, 2), 16));
+                    }
+                } else { // base64
+                    const binaryString = atob(ciphertextInput);
+                    cipherBytes = Array.from(binaryString, char => char.charCodeAt(0));
+                }
+
+                // Calculate actual offset position
+                const cribBytes = Array.from(crib, char => char.charCodeAt(0));
+                let actualOffset;
+                if (offset < 0) {
+                    actualOffset = cipherBytes.length + offset - cribBytes.length;
+                } else {
+                    actualOffset = offset;
+                }
+
+                if (actualOffset < 0 || actualOffset + cribBytes.length > cipherBytes.length) {
+                    throw new Error('Crib offset is out of bounds');
+                }
+
+                // Extract corresponding ciphertext section
+                const cipherSection = cipherBytes.slice(actualOffset, actualOffset + cribBytes.length);
+
+                // Recover keystream
+                const keystream = cipherSection.map((c, i) => c ^ cribBytes[i]);
+
+                showNotification(`Recovered ${keystream.length} bytes of keystream`, 'info');
+
+                // Convert to bits for Berlekamp-Massey
+                const keystreamBits = bytesToBits(keystream);
+
+                // Run Berlekamp-Massey
+                const bm = new BerlekampMassey(keystreamBits);
+                const polynomial = bm.getPolynomial();
+
+                if (polynomial.length === 0) {
+                    throw new Error('Berlekamp-Massey failed to find a polynomial (all zeros?)');
+                }
+
+                showNotification(`Found polynomial: ${bm.toString()}, degree: ${bm.getPolynomialDegree()}`, 'info');
+
+                // Reconstruct initial state
+                const initialState = reconstructInitialState(polynomial, keystream, actualOffset);
+
+                // Generate full keystream and decrypt
+                const lfsr = new LFSR(polynomial, initialState);
+
+                // Skip to the beginning if we had an offset
+                for (let i = 0; i < actualOffset * 8; i++) {
+                    lfsr.nextBit();
+                }
+
+                const plaintextBytes = [];
+                for (let i = 0; i < cipherBytes.length; i++) {
+                    const keystreamByte = lfsr.nextByte();
+                    plaintextBytes.push(cipherBytes[i] ^ keystreamByte);
+                }
+
+                // Try to display as text, fall back to hex
+                let result;
+                let debugInfo = `Polynomial: ${bm.toString()}\nDegree: ${bm.getPolynomialDegree()}\nOffset: ${actualOffset}`;
+
+                try {
+                    const decoder = new TextDecoder("utf-8", { fatal: true });
+                    result = decoder.decode(new Uint8Array(plaintextBytes));
+                } catch (e) {
+                    result = plaintextBytes.map(b => b.toString(16).padStart(2, '0')).join(' ');
+                    debugInfo += '\n(Displayed as hex due to invalid UTF-8 encoding)';
+                }
+  
+                showResult(result, debugInfo);
+                showNotification('Decryption completed successfully!', 'success');
+
+            } catch (error) {
+                showNotification(`Error: ${error.message}`, 'error');
+                console.error(error);
+            }
+        }
+
+        // Allow Enter key to submit
+        document.addEventListener('keydown', function(event) {
+            if (event.ctrlKey && event.key === 'Enter') {
+                decodeCipher();
+            }
+        });
+    </script>
+</body>
+</html>
